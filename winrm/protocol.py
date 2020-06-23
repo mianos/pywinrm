@@ -41,7 +41,7 @@ class Protocol(object):
             credssp_disable_tlsv1_2=False,
             send_cbt=True,
             proxy='legacy_requests',
-            command_loops=0,
+            max_wait=10,
         ):
         """
         @param string endpoint: the WinRM webservice endpoint
@@ -64,7 +64,7 @@ class Protocol(object):
         @param string kerberos_hostname_override: the hostname to use for the kerberos exchange (defaults to the hostname in the endpoint URL)
         @param bool message_encryption_enabled: Will encrypt the WinRM messages if set to True and the transport auth supports message encryption (Default True).
         @param string proxy: Specify a proxy for the WinRM connection to use. 'legacy_requests'(default) to use environment variables, None to disable proxies completely or the proxy URL itself.
-        @param int command_loops: The number of loops get_command_output will do before it raises a timeout exception.
+        @param int max_wait: The number of loops get_command_output will do before it raises a timeout exception.
         """
 
         try:
@@ -80,11 +80,16 @@ class Protocol(object):
         if operation_timeout_sec >= read_timeout_sec or operation_timeout_sec < 1:
             raise WinRMError("read_timeout_sec must exceed operation_timeout_sec, and both must be non-zero")
 
+        try:
+             max_wait = int(max_wait)
+        except ValueError as ve:
+            raise ValueError("failed to parse max_wait as int: %s" % str(ve))
+
         self.read_timeout_sec = read_timeout_sec
         self.operation_timeout_sec = operation_timeout_sec
         self.max_env_sz = Protocol.DEFAULT_MAX_ENV_SIZE
         self.locale = Protocol.DEFAULT_LOCALE
-        self.command_loops = command_loops
+        self.max_wait = max_wait
 
         self.transport = Transport(
             endpoint=endpoint, username=username, password=password,
@@ -446,7 +451,7 @@ class Protocol(object):
         """
         stdout_buffer, stderr_buffer = [], []
         command_done = False
-        command_loops_todo = self.command_loops
+        command_loops_todo = self.max_wait
         while not command_done:
             try:
                 stdout, stderr, return_code, command_done = \
@@ -456,10 +461,10 @@ class Protocol(object):
             except WinRMOperationTimeoutError:
                 # this is an expected error when waiting for a long-running process, just silently retry
                 pass
-            if self.command_loops:
+            if self.max_wait:
                 command_loops_todo -= 1
                 if not command_loops_todo:
-                    raise WinRMError('Too many loops waiting for command_done ({0})'.format(self.command_loops))
+                    raise WinRMError('Too many loops waiting for command_done ({0})'.format(self.max_wait))
         return b''.join(stdout_buffer), b''.join(stderr_buffer), return_code
 
     def _raw_get_command_output(self, shell_id, command_id):
